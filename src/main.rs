@@ -4,6 +4,7 @@ use zbus::Connection;
 
 use power_profiles_switcher::power_profiles::PowerProfilesProxy;
 use power_profiles_switcher::sensors::{Matcher, SubFeatureFinder as _};
+use power_profiles_switcher::upower::UPowerProxy;
 
 #[derive(Debug, Clone)]
 struct Config {
@@ -37,10 +38,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         performance_profile_name: "performance".to_string(),
     };
     let conn = Connection::system().await?;
-    let proxy = PowerProfilesProxy::new(&conn).await?;
+    let power_profiles_proxy = PowerProfilesProxy::new(&conn).await?;
+    let upower_proxy = UPowerProxy::new(&conn).await?;
     let duration = Duration::from_secs(1);
     let mut state = State::Normal;
     while let Ok(temp) = sub_feat.value().map(|v| v.raw_value()) {
+        tokio::time::sleep(duration).await;
+        if upower_proxy.on_battery().await? {
+            if let State::Set(cookie) = state {
+                let _ = power_profiles_proxy.release_profile(cookie).await;
+            }
+            state = State::Normal;
+            continue;
+        }
         let now = Instant::now();
         match (temp > config.temp, state) {
             (true, State::Normal) => {
@@ -48,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("temp={temp} {state:?}");
             }
             (true, State::Prepare(instant)) if now >= instant => {
-                let cookie = proxy
+                let cookie = power_profiles_proxy
                     .hold_profile(
                         &config.performance_profile_name,
                         "Temperature is rising",
@@ -63,13 +73,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("temp={temp} {state:?}");
             }
             (false, State::Set(cookie)) => {
-                proxy.release_profile(cookie).await?;
+                if power_profiles_proxy.release_profile(cookie).await.is_err() {
+                    println!("Power profile is changed by other programs!");
+                }
                 state = State::Normal;
                 println!("temp={temp} {state:?}");
             }
             _ => {}
         }
-        tokio::time::sleep(duration).await;
     }
     Ok(())
 }
