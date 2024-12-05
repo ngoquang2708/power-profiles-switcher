@@ -1,15 +1,41 @@
 use std::time::{Duration, Instant};
+use std::{fmt, fs};
 
+use anyhow::{anyhow, Context};
+use directories::BaseDirs;
+use serde::{Deserialize, Serialize};
 use zbus::Connection;
 
 use power_profiles_switcher::power_profiles::PowerProfilesProxy;
 use power_profiles_switcher::sensors::{Matcher, SubFeatureFinder as _};
 use power_profiles_switcher::upower::UPowerProxy;
 
-#[derive(Debug, Clone)]
+static APP_ID: &str = "com.ngoquang2708.PowerProfilesSwitcher";
+static REASON: &str = "Temperature is rising";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Config {
+    matcher: Matcher,
     temp: f64,
-    performance_profile_name: String,
+    profile: PowerProfiles,
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum PowerProfiles {
+    PowerSaver,
+    Balanced,
+    Performance,
+}
+
+impl fmt::Display for PowerProfiles {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PowerSaver => write!(f, "power-saver"),
+            Self::Balanced => write!(f, "balanced"),
+            Self::Performance => write!(f, "performance"),
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -19,24 +45,14 @@ enum State {
     Set(u32),
 }
 
-// TODO Disable on battery
-
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
+    let config = load_config()?;
     let sensors = lm_sensors::Initializer::default().initialize()?;
-    let matcher = Matcher {
-        chip_name: "coretemp-isa-0000".to_string(),
-        feat_name: "temp1".to_string(),
-        feat_label: "Package id 0".to_string().into(),
-        sub_feat_name: "temp1_input".to_string(),
-    };
-    let Some(sub_feat) = sensors.find(&matcher)? else {
-        panic!("Sub-feature not found!");
-    };
-    let config = Config {
-        temp: 65.0,
-        performance_profile_name: "performance".to_string(),
-    };
+    let sub_feat = sensors
+        .find(&config.matcher)
+        .context("finding sub-feature")?
+        .ok_or(anyhow!("Sub-feature not found!"))?;
     let conn = Connection::system().await?;
     let power_profiles_proxy = PowerProfilesProxy::new(&conn).await?;
     let upower_proxy = UPowerProxy::new(&conn).await?;
@@ -59,11 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             (true, State::Prepare(instant)) if now >= instant => {
                 let cookie = power_profiles_proxy
-                    .hold_profile(
-                        &config.performance_profile_name,
-                        "Temperature is rising",
-                        "com.ngoquang2708.PowerProfilesSwitcher",
-                    )
+                    .hold_profile(&config.profile.to_string(), REASON, APP_ID)
                     .await?;
                 state = State::Set(cookie);
                 println!("temp={temp} {state:?}");
@@ -83,4 +95,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     Ok(())
+}
+
+fn load_config() -> anyhow::Result<Config> {
+    let dir = BaseDirs::new()
+        .context("detect user's directories")?
+        .config_dir()
+        .join("PowerProfilesSwitcher");
+    let path = dir.join("config.toml");
+    let text = fs::read_to_string(path).context("reading config.toml")?;
+    toml::from_str(&text).context("deserializing config content")
 }

@@ -1,5 +1,7 @@
 use lm_sensors::{LMSensors, SubFeatureRef};
+use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Matcher {
     pub chip_name: String,
     pub feat_name: String,
@@ -8,11 +10,11 @@ pub struct Matcher {
 }
 
 pub trait SubFeatureFinder {
-    fn find(&self, matcher: &Matcher) -> Result<Option<SubFeatureRef>, Box<dyn std::error::Error>>;
+    fn find(&self, matcher: &Matcher) -> anyhow::Result<Option<SubFeatureRef>>;
 }
 
 impl SubFeatureFinder for LMSensors {
-    fn find(&self, matcher: &Matcher) -> Result<Option<SubFeatureRef>, Box<dyn std::error::Error>> {
+    fn find(&self, matcher: &Matcher) -> anyhow::Result<Option<SubFeatureRef>> {
         for chip in self.chip_iter(None) {
             // Find chip name
             if chip.name()? != matcher.chip_name {
