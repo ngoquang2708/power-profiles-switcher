@@ -4,6 +4,7 @@ use std::{fmt, fs};
 use anyhow::{anyhow, Context};
 use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
+use tokio_util::sync::CancellationToken;
 use zbus::Connection;
 
 use power_profiles_switcher::power_profiles::PowerProfilesProxy;
@@ -48,6 +49,7 @@ enum State {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = load_config()?;
+    let shutdown_token = CancellationToken::new();
     let sensors = lm_sensors::Initializer::default().initialize()?;
     let sub_feat = sensors
         .find(&config.matcher)
@@ -58,10 +60,40 @@ async fn main() -> anyhow::Result<()> {
     let upower_proxy = UPowerProxy::new(&conn).await?;
     let duration = Duration::from_secs(1);
     let mut state = State::Normal;
+    tokio::spawn({
+        let shutdown_token = shutdown_token.clone();
+        async move {
+            use tokio::signal::unix;
+            let Ok(mut terminate) = unix::signal(unix::SignalKind::terminate()) else {
+                println!("Failed to initialize terminate signal!");
+                return;
+            };
+            let interrupt = tokio::signal::ctrl_c();
+            tokio::select! {
+                _ = terminate.recv() => {
+                    println!("Received Terminate signal.");
+
+                }
+                _ = interrupt => {
+                    println!("Received Interrupt signal.");
+                }
+            }
+            shutdown_token.cancel();
+        }
+    });
     while let Ok(temp) = sub_feat.value().map(|v| v.raw_value()) {
         tokio::time::sleep(duration).await;
+        if shutdown_token.is_cancelled() {
+            if let State::Set(cookie) = state {
+                println!("Release held power profile on shutdown!");
+                let _ = power_profiles_proxy.release_profile(cookie).await;
+            }
+            println!("Exiting...");
+            break;
+        }
         if upower_proxy.on_battery().await? {
             if let State::Set(cookie) = state {
+                println!("Release held power profile on battery!");
                 let _ = power_profiles_proxy.release_profile(cookie).await;
             }
             state = State::Normal;

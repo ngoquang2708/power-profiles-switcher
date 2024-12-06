@@ -10,6 +10,7 @@ directories = "5"
 futures-util = "0.3"
 lm-sensors = "0.3"
 serde = { version = "1", features = ["derive"] }
-tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "signal"] }
+tokio-util = "0.7"
 toml = "0.8"
 zbus = { version = "5", default-features = false, features = ["tokio"] }
