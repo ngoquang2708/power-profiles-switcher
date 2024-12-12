@@ -1,0 +1,12 @@
+[Unit]
+Description=Power Profiles Switcher
+Requires=dbus.socket
+After=power-profiles-daemon.service
+After=upower.service
+
+[Service]
+Type=simple
+ExecStart=/home/$USER/bin/power-profiles-switcher
+
+[Install]
+WantedBy=default.target
