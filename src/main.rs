@@ -11,14 +11,12 @@ use power_profiles_switcher::power_profiles::PowerProfilesProxy;
 use power_profiles_switcher::sensors::{Matcher, SubFeatureFinder as _};
 use power_profiles_switcher::upower::UPowerProxy;
 
-static APP_ID: &str = "com.ngoquang2708.PowerProfilesSwitcher";
-static REASON: &str = "Temperature is rising";
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Config {
     matcher: Matcher,
     temp: f64,
-    profile: PowerProfiles,
+    inactive_profile: PowerProfiles,
+    active_profile: PowerProfiles,
 }
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize)]
@@ -41,9 +39,9 @@ impl fmt::Display for PowerProfiles {
 
 #[derive(Debug, Copy, Clone)]
 enum State {
-    Normal,
+    Inactive,
     Prepare(Instant),
-    Set(u32),
+    Active,
 }
 
 #[tokio::main]
@@ -59,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
     let power_profiles_proxy = PowerProfilesProxy::new(&conn).await?;
     let upower_proxy = UPowerProxy::new(&conn).await?;
     let duration = Duration::from_secs(1);
-    let mut state = State::Normal;
+    let mut state = State::Inactive;
     tokio::spawn({
         let shutdown_token = shutdown_token.clone();
         async move {
@@ -84,43 +82,49 @@ async fn main() -> anyhow::Result<()> {
     while let Ok(temp) = sub_feat.value().map(|v| v.raw_value()) {
         tokio::time::sleep(duration).await;
         if shutdown_token.is_cancelled() {
-            if let State::Set(cookie) = state {
-                println!("Release held power profile on shutdown!");
-                let _ = power_profiles_proxy.release_profile(cookie).await;
+            if let State::Active = state {
+                let profile = config.inactive_profile.to_string();
+                println!("Set power profile to {profile}!");
+                power_profiles_proxy
+                    .set_active_profile(profile.as_str())
+                    .await?;
             }
             println!("Exiting...");
             break;
         }
         if upower_proxy.on_battery().await? {
-            if let State::Set(cookie) = state {
-                println!("Release held power profile on battery!");
-                let _ = power_profiles_proxy.release_profile(cookie).await;
+            if let State::Active = state {
+                let profile = config.inactive_profile.to_string();
+                println!("Set power profile to {profile}!");
+                power_profiles_proxy
+                    .set_active_profile(profile.as_str())
+                    .await?;
             }
-            state = State::Normal;
+            state = State::Inactive;
             continue;
         }
         let now = Instant::now();
         match (temp > config.temp, state) {
-            (true, State::Normal) => {
+            (true, State::Inactive) => {
                 state = State::Prepare(now + Duration::from_secs(5));
                 println!("temp={temp} {state:?}");
             }
             (true, State::Prepare(instant)) if now >= instant => {
-                let cookie = power_profiles_proxy
-                    .hold_profile(&config.profile.to_string(), REASON, APP_ID)
+                power_profiles_proxy
+                    .set_active_profile(config.active_profile.to_string().as_str())
                     .await?;
-                state = State::Set(cookie);
+                state = State::Active;
                 println!("temp={temp} {state:?}");
             }
             (false, State::Prepare(instant)) if now >= instant => {
-                state = State::Normal;
+                state = State::Inactive;
                 println!("temp={temp} {state:?}");
             }
-            (false, State::Set(cookie)) => {
-                if power_profiles_proxy.release_profile(cookie).await.is_err() {
-                    println!("Power profile is changed by other programs!");
-                }
-                state = State::Normal;
+            (false, State::Active) => {
+                power_profiles_proxy
+                    .set_active_profile(config.inactive_profile.to_string().as_str())
+                    .await?;
+                state = State::Inactive;
                 println!("temp={temp} {state:?}");
             }
             _ => {}
