@@ -1,13 +1,13 @@
+use std::fs;
 use std::time::{Duration, Instant};
-use std::{fmt, fs};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use directories::BaseDirs;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use zbus::Connection;
 
-use power_profiles_switcher::power_profiles::PowerProfilesProxy;
+use power_profiles_switcher::power_profiles::{PowerProfilesProxy, Profiles};
 use power_profiles_switcher::sensors::{Matcher, SubFeatureFinder as _};
 use power_profiles_switcher::upower::UPowerProxy;
 
@@ -15,26 +15,8 @@ use power_profiles_switcher::upower::UPowerProxy;
 struct Config {
     matcher: Matcher,
     temp: f64,
-    inactive_profile: PowerProfiles,
-    active_profile: PowerProfiles,
-}
-
-#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-enum PowerProfiles {
-    PowerSaver,
-    Balanced,
-    Performance,
-}
-
-impl fmt::Display for PowerProfiles {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::PowerSaver => write!(f, "power-saver"),
-            Self::Balanced => write!(f, "balanced"),
-            Self::Performance => write!(f, "performance"),
-        }
-    }
+    inactive_profile: Profiles,
+    active_profile: Profiles,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -54,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
         .context("finding sub-feature")?
         .ok_or(anyhow!("Sub-feature not found!"))?;
     let conn = Connection::system().await?;
-    let power_profiles_proxy = PowerProfilesProxy::new(&conn).await?;
+    let pp_proxy = PowerProfilesProxy::new(&conn).await?;
     let upower_proxy = UPowerProxy::new(&conn).await?;
     let duration = Duration::from_secs(1);
     let mut state = State::Inactive;
@@ -83,22 +65,16 @@ async fn main() -> anyhow::Result<()> {
         tokio::time::sleep(duration).await;
         if shutdown_token.is_cancelled() {
             if let State::Active = state {
-                let profile = config.inactive_profile.to_string();
-                println!("Set power profile to {profile}!");
-                power_profiles_proxy
-                    .set_active_profile(profile.as_str())
-                    .await?;
+                println!("Set power profile to {}!", config.inactive_profile);
+                pp_proxy.set_active(&config.inactive_profile).await?;
             }
             println!("Exiting...");
             break;
         }
         if upower_proxy.on_battery().await? {
             if let State::Active = state {
-                let profile = config.inactive_profile.to_string();
-                println!("Set power profile to {profile}!");
-                power_profiles_proxy
-                    .set_active_profile(profile.as_str())
-                    .await?;
+                println!("Set power profile to {}!", config.inactive_profile);
+                pp_proxy.set_active(&config.inactive_profile).await?;
             }
             state = State::Inactive;
             continue;
@@ -110,9 +86,7 @@ async fn main() -> anyhow::Result<()> {
                 println!("temp={temp} {state:?}");
             }
             (true, State::Prepare(instant)) if now >= instant => {
-                power_profiles_proxy
-                    .set_active_profile(config.active_profile.to_string().as_str())
-                    .await?;
+                pp_proxy.set_active(&config.active_profile).await?;
                 state = State::Active;
                 println!("temp={temp} {state:?}");
             }
@@ -121,9 +95,7 @@ async fn main() -> anyhow::Result<()> {
                 println!("temp={temp} {state:?}");
             }
             (false, State::Active) => {
-                power_profiles_proxy
-                    .set_active_profile(config.inactive_profile.to_string().as_str())
-                    .await?;
+                pp_proxy.set_active(&config.inactive_profile).await?;
                 state = State::Inactive;
                 println!("temp={temp} {state:?}");
             }
