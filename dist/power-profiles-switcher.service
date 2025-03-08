@@ -6,7 +6,7 @@ After=upower.service
 
 [Service]
 Type=simple
-ExecStart=/home/$USER/bin/power-profiles-switcher
+ExecStart=%h/bin/power-profiles-switcher
 
 [Install]
 WantedBy=default.target
