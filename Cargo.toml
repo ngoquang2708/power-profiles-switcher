@@ -1,12 +1,12 @@
 [package]
 name = "power-profiles-switcher"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 authors = ["Quang Ngô <ngoquang2708@gmail.com>"]
 
 [dependencies]
 anyhow = "1"
-directories = "5"
+directories = "6"
 futures-util = "0.3"
 lm-sensors = "0.3"
 serde = { version = "1", features = ["derive"] }

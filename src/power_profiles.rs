@@ -3,7 +3,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use zbus::proxy;
+use zbus::{Error, Result, proxy};
 use zvariant::{OwnedValue, Type, Value};
 
 #[proxy(
@@ -13,51 +13,49 @@ use zvariant::{OwnedValue, Type, Value};
 )]
 pub trait PowerProfiles {
     #[zbus(name = "HoldProfile")]
-    fn hold(&self, profile: &Profiles, reason: &str, application_id: &str) -> zbus::Result<u32>;
+    fn hold(&self, profile: &Profile, reason: &str, application_id: &str) -> Result<u32>;
 
     #[zbus(name = "ReleaseProfile")]
-    fn release(&self, cookie: u32) -> zbus::Result<()>;
+    fn release(&self, cookie: u32) -> Result<()>;
 
     #[zbus(signal, name = "ProfileReleased")]
-    fn released(&self, cookie: u32) -> zbus::Result<()>;
+    fn released(&self, cookie: u32) -> Result<()>;
 
     #[zbus(property)]
-    fn actions(&self) -> zbus::Result<Vec<String>>;
+    fn actions(&self) -> Result<Vec<String>>;
 
     #[zbus(property, name = "ActiveProfile")]
-    fn get_active(&self) -> zbus::Result<Profiles>;
+    fn get_active(&self) -> Result<Profile>;
 
     #[zbus(property, name = "ActiveProfile")]
-    fn set_active(&self, value: &Profiles) -> zbus::Result<()>;
+    fn set_active(&self, value: &Profile) -> Result<()>;
 
     #[zbus(property)]
-    fn active_profile_holds(
-        &self,
-    ) -> zbus::Result<Vec<HashMap<String, zbus::zvariant::OwnedValue>>>;
+    fn active_profile_holds(&self) -> Result<Vec<HashMap<String, OwnedValue>>>;
 
     #[zbus(property)]
-    fn performance_degraded(&self) -> zbus::Result<String>;
+    fn performance_degraded(&self) -> Result<String>;
 
     #[zbus(property)]
-    fn performance_inhibited(&self) -> zbus::Result<String>;
+    fn performance_inhibited(&self) -> Result<String>;
 
     #[zbus(property)]
-    fn profiles(&self) -> zbus::Result<Vec<HashMap<String, zbus::zvariant::OwnedValue>>>;
+    fn profiles(&self) -> Result<Vec<HashMap<String, OwnedValue>>>;
 
     #[zbus(property)]
-    fn version(&self) -> zbus::Result<String>;
+    fn version(&self) -> Result<String>;
 }
 
 #[derive(Debug, Copy, Clone, Hash, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 #[zvariant(signature = "s")]
-pub enum Profiles {
+pub enum Profile {
     PowerSaver,
     Balanced,
     Performance,
 }
 
-impl Profiles {
+impl Profile {
     fn as_str(&self) -> &str {
         match self {
             Self::PowerSaver => "power-saver",
@@ -67,37 +65,37 @@ impl Profiles {
     }
 }
 
-impl fmt::Display for Profiles {
+impl fmt::Display for Profile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl FromStr for Profiles {
-    type Err = ();
+impl FromStr for Profile {
+    type Err = Error;
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
+    fn from_str(s: &str) -> Result<Self> {
         match s {
             "power-saver" => Ok(Self::PowerSaver),
             "balanced" => Ok(Self::Balanced),
             "performance" => Ok(Self::Performance),
-            _ => Err(()),
+            _ => Err(Self::Err::InvalidReply),
         }
     }
 }
 
-impl<'a> From<&'a Profiles> for Value<'a> {
-    fn from(value: &'a Profiles) -> Self {
+impl<'a> From<&'a Profile> for Value<'a> {
+    fn from(value: &'a Profile) -> Self {
         Self::Str(value.as_str().into())
     }
 }
 
-impl TryFrom<OwnedValue> for Profiles {
-    type Error = zbus::Error;
+impl TryFrom<OwnedValue> for Profile {
+    type Error = Error;
 
-    fn try_from(value: OwnedValue) -> zbus::Result<Self> {
+    fn try_from(value: OwnedValue) -> Result<Self> {
         if let Value::Str(s) = &*value {
-            if let Ok(p) = Profiles::from_str(s) {
+            if let Ok(p) = Profile::from_str(s) {
                 return Ok(p);
             }
         }
