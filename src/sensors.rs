@@ -10,11 +10,11 @@ pub struct Matcher {
 }
 
 pub trait SubFeatureFinder {
-    fn find(&self, matcher: &Matcher) -> anyhow::Result<Option<SubFeatureRef>>;
+    fn find(&self, matcher: &Matcher) -> anyhow::Result<Option<SubFeatureRef<'_>>>;
 }
 
 impl SubFeatureFinder for LMSensors {
-    fn find(&self, matcher: &Matcher) -> anyhow::Result<Option<SubFeatureRef>> {
+    fn find(&self, matcher: &Matcher) -> anyhow::Result<Option<SubFeatureRef<'_>>> {
         for chip in self.chip_iter(None) {
             // Find chip name
             if chip.name()? != matcher.chip_name {
