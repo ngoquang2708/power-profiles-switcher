@@ -60,7 +60,7 @@ pub trait User {
     fn gid(&self) -> Result<u32>;
 }
 
-#[derive(Debug, Clone, Copy, Hash, Serialize, Deserialize, Type)]
+#[derive(Debug, Clone, Copy, Hash, Eq, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 pub enum State {
     Offline,

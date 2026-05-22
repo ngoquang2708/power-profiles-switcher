@@ -46,7 +46,7 @@ pub trait PowerProfiles {
     fn version(&self) -> Result<String>;
 }
 
-#[derive(Debug, Copy, Clone, Hash, Serialize, Deserialize, Type)]
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "kebab-case")]
 #[zvariant(signature = "s")]
 pub enum Profile {
