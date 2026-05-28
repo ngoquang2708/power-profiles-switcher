@@ -22,7 +22,7 @@ struct Config {
     active_profile: Profile,
 }
 
-#[derive(Default, Debug, Clone)]
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
 enum State {
     #[default]
     None,
@@ -59,6 +59,13 @@ async fn main() -> anyhow::Result<()> {
         }
         Ok(())
     };
+    let reset_profile = async |current| {
+        if current == State::Inactive {
+            return Ok(());
+        }
+        println!("Set power profile to {}!", config.inactive_profile);
+        switch_profile(config.inactive_profile).await
+    };
     tokio::spawn({
         let shutdown_token = shutdown_token.clone();
         async move {
@@ -82,19 +89,15 @@ async fn main() -> anyhow::Result<()> {
     while let Ok(temp) = sub_feat.value().map(|v| v.raw_value()) {
         tokio::time::sleep(duration).await;
         if shutdown_token.is_cancelled() {
-            if let State::Active = state {
-                println!("Set power profile to {}!", config.inactive_profile);
-                switch_profile(config.inactive_profile).await?;
-            }
+            reset_profile(state).await?;
             println!("Exiting...");
             break;
         }
         if upower_proxy.on_battery().await? {
-            if let State::Active = state {
-                println!("Set power profile to {}!", config.inactive_profile);
-                switch_profile(config.inactive_profile).await?;
+            if state != State::Inactive {
+                reset_profile(state).await?;
+                state = State::Inactive;
             }
-            state = State::Inactive;
             continue;
         }
         let now = Instant::now();
